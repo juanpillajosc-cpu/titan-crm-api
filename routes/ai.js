@@ -237,4 +237,50 @@ ${hasHistory
   }
 });
 
+// ---------- Priorización de Cobranza (reemplaza la fórmula fija del prototipo) ----------
+router.post('/prioritize-collections', async (req, res) => {
+  try {
+    const { clients } = req.body;
+    if (!Array.isArray(clients) || clients.length === 0) {
+      return res.status(400).json({ error: 'No se recibió la cartera de clientes a priorizar.' });
+    }
+
+    const clientsText = clients.map((c) => {
+      const history = (c.collectionsHistory || []);
+      const compromisosRotos = history.filter((h) => h.compromiso && h.compromiso.fecha).length;
+      const lastGestion = history.length > 0 ? history[history.length - 1] : null;
+      return `- ${c.id} "${c.name}": deuda $${c.debt}, días en mora: ${c.daysInMora}, cupo total $${c.creditQuota}, cupo disponible $${c.availableQuota}, últimas gestiones registradas: ${history.length}${lastGestion ? ` (última: ${lastGestion.date}, tipo ${lastGestion.tipo}, resultado ${lastGestion.resultado})` : ' (sin gestiones registradas)'}, última compra: ${c.lastPurchaseDate || 'sin registro'}.`;
+    }).join('\n');
+
+    const systemPrompt = `Eres un analista senior de Crédito y Cobranza de Titán, canal mayorista de Corporación Favorita en Ecuador. Tu trabajo es priorizar la gestión diaria de cobranza de la cartera de clientes institucionales, identificando quiénes representan mayor riesgo de incumplimiento o mayor impacto en el flujo de caja si no se gestionan pronto.
+
+Analiza cada cliente considerando: días en mora (mayor mora = mayor urgencia, pero no es lo único), monto adeudado en relación a su cupo de crédito (una deuda alta relativa a un cupo bajo es más riesgosa que la misma deuda en un cupo grande), historial de gestiones previas (si ya se le contactó varias veces sin resultado, sube la prioridad; si tiene compromisos de pago recientes, puede bajar), y actividad reciente de compra (un cliente activo que compra seguido pero se atrasa en pagar es distinto a uno inactivo).
+
+No apliques una fórmula mecánica fija — usa criterio real de riesgo crediticio, como lo haría un analista experimentado, y varía tus puntajes de forma realista (no todos altos ni todos iguales).
+
+Responde ÚNICAMENTE con un JSON válido (sin texto adicional, sin markdown) con esta forma exacta:
+{"priorities": [{"clientId": "<id EXACTO>", "priority": "<Alta|Media|Baja>", "score": <0-100>, "reasoning": "<1-2 frases explicando por qué, citando datos específicos del cliente>"}]}
+Incluye una entrada por cada cliente recibido.`;
+
+    const userPrompt = `Cartera de clientes a priorizar:\n${clientsText}`;
+
+    const result = await callClaude(systemPrompt, userPrompt, { maxTokens: 2000 });
+
+    const validIds = new Set(clients.map((c) => c.id));
+    const priorities = (Array.isArray(result.priorities) ? result.priorities : [])
+      .filter((p) => validIds.has(p.clientId))
+      .map((p) => ({
+        clientId: p.clientId,
+        priority: ['Alta', 'Media', 'Baja'].includes(p.priority) ? p.priority : 'Media',
+        score: Math.max(0, Math.min(100, Math.round(p.score) || 0)),
+        reasoning: p.reasoning || '',
+      }));
+
+    res.json({ priorities, date: new Date().toLocaleString('es-EC') });
+  } catch (err) {
+    console.error('POST /ai/prioritize-collections error:', err);
+    res.status(500).json({ error: 'No se pudo priorizar la cartera con IA', detail: err.message });
+  }
+});
+
 export default router;
