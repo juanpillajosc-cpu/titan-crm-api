@@ -36,7 +36,7 @@ app.use('/api/quotes', createCrudRouter({
   jsonbSnakeFields: ['items', 'versions', 'sent_info'],
 }));
 
-app.use('/api/orders', createCrudRouter({ table: 'orders', idPrefix: 'PED-', idStart: 101, idPadding: 0 }));
+app.use('/api/orders', createCrudRouter({ table: 'orders', idPrefix: 'PED-', idStart: 101, idPadding: 0, jsonbSnakeFields: ['items'] }));
 
 // ---------- IA real (lead scoring y recomendación de crédito) ----------
 app.use('/api/ai', aiRouter);
