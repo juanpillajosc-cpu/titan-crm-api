@@ -30,14 +30,23 @@ CREATE TABLE IF NOT EXISTS prospects (
   address       TEXT,
   legal_rep     TEXT,
   taxpayer_type TEXT,
+  regimen_tributario TEXT,
   status        TEXT DEFAULT 'Prospecto',
   ai_score      INTEGER,
   ai_reasoning  TEXT,
+  ai_cluster    TEXT,
+  ai_analysis   JSONB DEFAULT '{}',
   priority      TEXT,
   history       JSONB DEFAULT '[]',
   created_at    TIMESTAMPTZ DEFAULT now(),
   updated_at    TIMESTAMPTZ DEFAULT now()
 );
+
+-- Columnas agregadas después del primer despliegue: ALTER TABLE es seguro de re-correr,
+-- no borra ni afecta las filas que ya existen en producción.
+ALTER TABLE prospects ADD COLUMN IF NOT EXISTS regimen_tributario TEXT;
+ALTER TABLE prospects ADD COLUMN IF NOT EXISTS ai_cluster TEXT;
+ALTER TABLE prospects ADD COLUMN IF NOT EXISTS ai_analysis JSONB DEFAULT '{}';
 
 CREATE TABLE IF NOT EXISTS clients (
   id                    TEXT PRIMARY KEY,
