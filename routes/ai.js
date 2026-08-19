@@ -38,29 +38,79 @@ async function callClaude(systemPrompt, userPrompt) {
   return JSON.parse(cleaned);
 }
 
-// ---------- Lead Scoring de prospectos (reemplaza el Math.random() del prototipo) ----------
+// ---------- Lead Scoring de prospectos: "Puntaje de Potencial Mayorista" ----------
+// Metodología de scoring lookalike/firmográfico definida por Titán (sin datos de comportamiento
+// digital): 3 variables ponderadas -> Tipo de Negocio (50%), Régimen Tributario (35%), Ubicación (15%).
 router.post('/score-prospect', async (req, res) => {
   try {
-    const { name, type, city, size, observations, history } = req.body;
+    const { name, type, city, regimenTributario, observations, history } = req.body;
 
-    const systemPrompt = `Eres un analista comercial senior de Titán, canal mayorista de Corporación Favorita en Ecuador, especializado en calificar prospectos institucionales (hoteles, restaurantes, cafeterías, comercios, corporativos) para priorizar el esfuerzo del equipo de ventas.
-Analiza el prospecto y responde ÚNICAMENTE con un JSON válido (sin texto adicional, sin markdown) con esta forma exacta:
-{"score": <número entero 0-100>, "priority": "<Alta|Media|Baja>", "reasoning": "<2-3 frases explicando por qué, en español, mencionando las variables consideradas>"}
-Criterios a considerar: tipo de negocio y su volumen de consumo típico de insumos institucionales, ciudad (Quito/Guayaquil suelen tener mayor densidad de cuentas institucionales y logística más simple), tamaño estimado del negocio, y cualquier señal en las observaciones. Prioridad Alta = score >= 75, Media = 40-74, Baja = <40.`;
+    const systemPrompt = `Eres un Científico de Datos senior y Consultor de Estrategia Comercial B2B, especializado en el sector de distribución mayorista de alimentos y consumo masivo en Ecuador. Trabajas para "Titán, tu Socio Mayorista".
 
-    const userPrompt = `Prospecto a calificar:
+Aplica EXACTAMENTE esta metodología de "Puntaje de Potencial Mayorista" (Modelado Lookalike / Datos Firmográficos, sin datos de comportamiento digital):
+
+FÓRMULA (peso de cada variable):
+- Tipo de Negocio: 50% — predictor más fuerte del patrón de recompra recurrente.
+- Régimen Tributario: 35% — proxy oficial de tamaño económico (RIMPE Popular: tope ~$20,000/año; RIMPE Emprendedor: tope ~$300,000/año; Régimen General: sin tope).
+- Ubicación: 15% — señal más débil, indica densidad comercial y costo logístico, no garantiza volumen.
+
+TABLA DE PUNTOS (escala 0-10 por variable):
+Tipo de Negocio: Hotel=10, Restaurante=9, Minimarket=8, Panadería=8, Cafetería=7, Tienda=6, Particular=0. Si el tipo no está en esta lista, asigna el puntaje más parecido según su patrón de consumo institucional.
+Régimen Tributario: Régimen General=10, RIMPE Emprendedor=6, RIMPE Popular=3. Si no se especifica, usa 5 (neutral) y acláralo en la justificación.
+Ubicación: clasifica la ciudad/sector en Comercial-Consolidado=10, Residencial-Mixto=6, o Rural-Periférico=3, usando tu conocimiento general de la geografía comercial ecuatoriana (ej. Urdesa, Kennedy, Ceibos, La Carolina, González Suárez = comercial consolidado).
+
+FÓRMULA FINAL: score = (PtsNegocio/10 × 50) + (PtsRégimen/10 × 35) + (PtsUbicación/10 × 15)
+
+CLÚSTERES: Oro (75-100, alta prioridad), Plata (40-74, maduración), Bronce (0-39, descartado/bajo esfuerzo).
+
+Responde ÚNICAMENTE con un JSON válido (sin texto adicional, sin markdown) con esta forma EXACTA:
+{
+  "businessTypePoints": <0-10>,
+  "businessTypeJustification": "<1 frase>",
+  "regimePoints": <0-10>,
+  "regimeJustification": "<1 frase>",
+  "locationPoints": <0-10>,
+  "locationClassification": "<Comercial-Consolidado|Residencial-Mixto|Rural-Periférico>",
+  "locationJustification": "<1 frase>",
+  "score": <0-100, resultado exacto de la fórmula>,
+  "cluster": "<Oro|Plata|Bronce>",
+  "reasoning": "<2-3 frases resumen ejecutivo, para mostrar en la lista de prospectos>"
+}`;
+
+    const userPrompt = `Lead a calificar:
 - Nombre comercial: ${name || 'N/D'}
 - Tipo de negocio: ${type || 'N/D'}
-- Ciudad: ${city || 'N/D'}
-- Tamaño estimado: ${size || 'N/D'}
-- Observaciones del ejecutivo: ${observations || 'Ninguna'}
+- Régimen Tributario: ${regimenTributario || 'No especificado'}
+- Ciudad / Ubicación: ${city || 'N/D'}
+- Observaciones adicionales: ${observations || 'Ninguna'}
 - Historial de seguimiento: ${history?.length ? history.map(h => h.details).join('; ') : 'Sin historial previo'}`;
 
     const result = await callClaude(systemPrompt, userPrompt);
+
+    // Verificamos que la fórmula cuadre (por si el modelo se desvía); si no, la recalculamos nosotros mismos.
+    const expectedScore = Math.round(
+      (result.businessTypePoints / 10) * 50 +
+      (result.regimePoints / 10) * 35 +
+      (result.locationPoints / 10) * 15
+    );
+    const score = Math.max(0, Math.min(100, Math.round(result.score) || expectedScore));
+    const cluster = score >= 75 ? 'Oro' : score >= 40 ? 'Plata' : 'Bronce';
+
     res.json({
-      score: Math.max(0, Math.min(100, Math.round(result.score))),
-      priority: result.priority,
+      score,
+      cluster,
+      priority: cluster === 'Oro' ? 'Alta' : cluster === 'Plata' ? 'Media' : 'Baja', // compatibilidad con el resto del CRM
       reasoning: result.reasoning,
+      analysis: {
+        businessTypePoints: result.businessTypePoints,
+        businessTypeJustification: result.businessTypeJustification,
+        regimePoints: result.regimePoints,
+        regimeJustification: result.regimeJustification,
+        locationPoints: result.locationPoints,
+        locationClassification: result.locationClassification,
+        locationJustification: result.locationJustification,
+        formula: `(${result.businessTypePoints}/10 × 50) + (${result.regimePoints}/10 × 35) + (${result.locationPoints}/10 × 15) = ${score}/100`,
+      },
     });
   } catch (err) {
     console.error('POST /ai/score-prospect error:', err);
