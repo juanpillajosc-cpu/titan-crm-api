@@ -124,13 +124,20 @@ ALTER TABLE quotes ADD COLUMN IF NOT EXISTS client_response_reason TEXT;
 CREATE TABLE IF NOT EXISTS orders (
   id                TEXT PRIMARY KEY,
   client            TEXT,
+  client_id         TEXT,
+  quote_id          TEXT,
   date              DATE,
   total             NUMERIC DEFAULT 0,
   status            TEXT,
   payment_condition TEXT,
   validation_note   TEXT,
+  items             JSONB DEFAULT '[]',
   created_at        TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS client_id TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS quote_id TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS items JSONB DEFAULT '[]';
 
 -- ============================================================
 -- Usuarios reales del equipo (segregación de funciones)
