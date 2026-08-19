@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS clients (
   address               TEXT,
   legal_rep             TEXT,
   taxpayer_type         TEXT,
+  contact               TEXT,
+  commercial_refs       TEXT,
   source_prospect_id    TEXT,
   last_purchase_date    DATE,
   credit_line_expiry    DATE,
@@ -73,6 +75,10 @@ CREATE TABLE IF NOT EXISTS clients (
   created_at            TIMESTAMPTZ DEFAULT now(),
   updated_at            TIMESTAMPTZ DEFAULT now()
 );
+
+-- Columnas agregadas después del primer despliegue: seguro de re-correr, no borra datos existentes.
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS contact TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS commercial_refs TEXT;
 
 CREATE TABLE IF NOT EXISTS products (
   id          TEXT PRIMARY KEY,
