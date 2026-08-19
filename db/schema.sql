@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS clients (
   credit_line_expiry    DATE,
   agreement_expiry      DATE,
   approval_observations TEXT,
+  approval_history      JSONB DEFAULT '[]',
   documents             JSONB DEFAULT '[]',
   collections_history   JSONB DEFAULT '[]',
   activities            JSONB DEFAULT '[]',
@@ -79,6 +80,7 @@ CREATE TABLE IF NOT EXISTS clients (
 -- Columnas agregadas después del primer despliegue: seguro de re-correr, no borra datos existentes.
 ALTER TABLE clients ADD COLUMN IF NOT EXISTS contact TEXT;
 ALTER TABLE clients ADD COLUMN IF NOT EXISTS commercial_refs TEXT;
+ALTER TABLE clients ADD COLUMN IF NOT EXISTS approval_history JSONB DEFAULT '[]';
 
 CREATE TABLE IF NOT EXISTS products (
   id          TEXT PRIMARY KEY,
