@@ -98,25 +98,28 @@ CREATE TABLE IF NOT EXISTS products (
 );
 
 CREATE TABLE IF NOT EXISTS quotes (
-  id                TEXT PRIMARY KEY,
-  client            TEXT,
-  client_id         TEXT,
-  exec              TEXT,
-  date              DATE,
-  valid_until       DATE,
-  payment_condition TEXT,
-  credit_days       INTEGER,
-  items             JSONB DEFAULT '[]',
-  subtotal          NUMERIC DEFAULT 0,
-  iva_total         NUMERIC DEFAULT 0,
-  total             NUMERIC DEFAULT 0,
-  conditions        TEXT,
-  status            TEXT DEFAULT 'Borrador',
-  versions          JSONB DEFAULT '[]',
-  sent_info         JSONB,
-  created_at        TIMESTAMPTZ DEFAULT now(),
-  updated_at        TIMESTAMPTZ DEFAULT now()
+  id                     TEXT PRIMARY KEY,
+  client                 TEXT,
+  client_id              TEXT,
+  exec                   TEXT,
+  date                   DATE,
+  valid_until            DATE,
+  payment_condition      TEXT,
+  credit_days            INTEGER,
+  items                  JSONB DEFAULT '[]',
+  subtotal               NUMERIC DEFAULT 0,
+  iva_total              NUMERIC DEFAULT 0,
+  total                  NUMERIC DEFAULT 0,
+  conditions             TEXT,
+  status                 TEXT DEFAULT 'Borrador',
+  versions               JSONB DEFAULT '[]',
+  sent_info              JSONB,
+  client_response_reason TEXT,
+  created_at             TIMESTAMPTZ DEFAULT now(),
+  updated_at             TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS client_response_reason TEXT;
 
 CREATE TABLE IF NOT EXISTS orders (
   id                TEXT PRIMARY KEY,
