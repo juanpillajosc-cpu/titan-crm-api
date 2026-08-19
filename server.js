@@ -11,14 +11,14 @@ const app = express();
 // Mientras se configura, permite cualquier origen para no bloquear las pruebas iniciales.
 const allowedOrigin = process.env.FRONTEND_URL;
 app.use(cors(allowedOrigin ? { origin: allowedOrigin } : {}));
-app.use(express.json({ limit: '5mb' })); // fotos de perfil/producto van en base64
+app.use(express.json({ limit: '15mb' })); // fotos de perfil/producto y documentos de clientes van en base64
 
 // ---------- Rutas de recursos (mismo esquema de IDs que usaba el frontend) ----------
 app.use('/api/users', createCrudRouter({ table: 'users', idPrefix: 'U', idStart: 1, idPadding: 3 }));
 
 app.use('/api/prospects', createCrudRouter({
   table: 'prospects', idPrefix: 'P', idStart: 1, idPadding: 3, hasUpdatedAt: true,
-  jsonbSnakeFields: ['history'],
+  jsonbSnakeFields: ['history', 'ai_analysis'],
 }));
 
 app.use('/api/clients', createCrudRouter({
