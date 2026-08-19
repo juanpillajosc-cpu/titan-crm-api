@@ -186,4 +186,55 @@ Esta es una recomendación de apoyo; la decisión final la toma siempre el Jefe 
   }
 });
 
+// ---------- Venta Cruzada / Recomendación de productos (reemplaza la tabla fija del prototipo) ----------
+router.post('/recommend-products', async (req, res) => {
+  try {
+    const { client, catalog, purchaseHistory } = req.body;
+    const hasHistory = Array.isArray(purchaseHistory) && purchaseHistory.length > 0;
+
+    if (!Array.isArray(catalog) || catalog.length === 0) {
+      return res.status(400).json({ error: 'No se recibió el catálogo de productos disponible.' });
+    }
+
+    const catalogText = catalog.map((p) => `- ${p.id}: ${p.name} — ${p.description || 'sin descripción'}`).join('\n');
+
+    const systemPrompt = `Eres un asesor comercial senior de Titán, canal mayorista de Corporación Favorita en Ecuador, especializado en venta cruzada B2B para negocios institucionales (hoteles, restaurantes, cafeterías, comercios).
+
+Tu trabajo es recomendar productos de NUESTRO CATÁLOGO (nunca inventes productos fuera de esta lista, usa exactamente los IDs dados) que le convendría comprar a este cliente, para que el ejecutivo se los ofrezca proactivamente y aumente el ticket de venta.
+
+CATÁLOGO DISPONIBLE:
+${catalogText}
+
+${hasHistory
+  ? 'Este cliente YA tiene historial de compras con nosotros. Analiza los patrones reales: qué compra, con qué frecuencia, en qué cantidades, y si hay señales de que le convendría reponer algo pronto o probar un producto complementario a lo que ya compra. Basa la cantidad sugerida en el patrón real observado (ej. si compra ~50 unidades por pedido, sugiere una cantidad similar o ligeramente ajustada según la tendencia).'
+  : 'Este cliente NO tiene historial de compras todavía (es su primera cotización con nosotros). Recomienda productos del catálogo que mejor encajen con su segmento/tipo de negocio, basándote en qué necesita típicamente un negocio de ese tipo en Ecuador.'}
+
+Responde ÚNICAMENTE con un JSON válido (sin texto adicional, sin markdown) con esta forma exacta:
+{"recommendations": [{"productId": "<id EXACTO del catálogo>", "reason": "<1-2 frases específicas y útiles como argumento de venta para el ejecutivo>", "suggestedQuantity": <número entero o null si no aplica>}]}
+Recomienda entre 2 y 4 productos, los más relevantes para este caso — no rellenes la lista con productos poco relevantes solo por completar.`;
+
+    const userPrompt = `Cliente: ${client?.name || 'N/D'} — Segmento: ${client?.segment || 'N/D'}
+${hasHistory
+  ? `Historial de compras (fecha, producto, cantidad):\n${purchaseHistory.map((h) => `- ${h.date}: ${h.productName} x${h.quantity}`).join('\n')}`
+  : 'Sin historial de compras previo con este cliente.'}`;
+
+    const result = await callClaude(systemPrompt, userPrompt, { maxTokens: 1000 });
+
+    const validIds = new Set(catalog.map((p) => p.id));
+    const recommendations = (Array.isArray(result.recommendations) ? result.recommendations : [])
+      .filter((r) => validIds.has(r.productId))
+      .slice(0, 4)
+      .map((r) => ({
+        productId: r.productId,
+        reason: r.reason,
+        suggestedQuantity: r.suggestedQuantity ? Math.max(1, Math.round(r.suggestedQuantity)) : null,
+      }));
+
+    res.json({ recommendations, basedOn: hasHistory ? 'historial' : 'cold-start' });
+  } catch (err) {
+    console.error('POST /ai/recommend-products error:', err);
+    res.status(500).json({ error: 'No se pudo generar la recomendación de productos con IA', detail: err.message });
+  }
+});
+
 export default router;
