@@ -6,10 +6,23 @@ const AI_MODEL = process.env.AI_MODEL || 'claude-sonnet-5';
 
 // Llama a la API de Anthropic con la key protegida en el servidor (nunca en el navegador),
 // pidiendo una respuesta en JSON puro para poder parsearla de forma confiable.
-async function callClaude(systemPrompt, userPrompt, maxTokens = 1200) {
+// enableSearch=true le da a Claude acceso a búsqueda web real, para que investigue contexto
+// verificable en vez de improvisar — el análisis deja de ser una tabla mecánica y pasa a ser
+// una investigación genuina, con fuentes citables.
+async function callClaude(systemPrompt, userPrompt, { maxTokens = 1200, enableSearch = false } = {}) {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error('Falta configurar ANTHROPIC_API_KEY en las variables de entorno del backend.');
   }
+  const body = {
+    model: AI_MODEL,
+    max_tokens: maxTokens,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userPrompt }],
+  };
+  if (enableSearch) {
+    body.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }];
+  }
+
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -17,12 +30,7 @@ async function callClaude(systemPrompt, userPrompt, maxTokens = 1200) {
       'x-api-key': process.env.ANTHROPIC_API_KEY,
       'anthropic-version': '2023-06-01',
     },
-    body: JSON.stringify({
-      model: AI_MODEL,
-      max_tokens: maxTokens,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -31,16 +39,37 @@ async function callClaude(systemPrompt, userPrompt, maxTokens = 1200) {
   }
 
   const data = await response.json();
-  const textBlock = data.content?.find((b) => b.type === 'text');
-  if (!textBlock) throw new Error('La API de IA no devolvió una respuesta de texto.');
+  // Con búsqueda web activada, la respuesta trae varios bloques (texto + búsquedas + resultados)
+  // intercalados. El JSON final que nos interesa está en el ÚLTIMO bloque de texto, así que unimos
+  // todos los bloques de texto por si Claude "piensa en voz alta" antes de dar el JSON final.
+  const textBlocks = (data.content || []).filter((b) => b.type === 'text');
+  if (textBlocks.length === 0) throw new Error('La API de IA no devolvió una respuesta de texto.');
+  const rawText = textBlocks[textBlocks.length - 1].text;
 
-  const cleaned = textBlock.text.replace(/```json|```/g, '').trim();
+  const cleaned = rawText.replace(/```json|```/g, '').trim();
+  let parsed;
   try {
-    return JSON.parse(cleaned);
+    parsed = JSON.parse(cleaned);
   } catch (parseErr) {
     console.error('No se pudo parsear la respuesta de la IA como JSON. Texto crudo:', cleaned);
     throw new Error(`La IA devolvió una respuesta incompleta o mal formada (posible corte por límite de tokens). ${parseErr.message}`);
   }
+
+  // Además de lo que Claude reporte en el campo "sources" del JSON, extraemos también las
+  // fuentes reales de las búsquedas web ejecutadas (por si Claude olvida listarlas en el JSON).
+  const webSources = [];
+  (data.content || []).forEach((block) => {
+    if (block.type === 'web_search_tool_result' && Array.isArray(block.content)) {
+      block.content.forEach((r) => {
+        if (r.url && r.title) webSources.push({ title: r.title, url: r.url });
+      });
+    }
+  });
+  if (webSources.length > 0 && (!parsed.sources || parsed.sources.length === 0)) {
+    parsed.sources = webSources.slice(0, 6);
+  }
+
+  return parsed;
 }
 
 // ---------- Lead Scoring de prospectos: "Puntaje de Potencial Mayorista" ----------
@@ -52,34 +81,35 @@ router.post('/score-prospect', async (req, res) => {
 
     const systemPrompt = `Eres un Científico de Datos senior y Consultor de Estrategia Comercial B2B, especializado en el sector de distribución mayorista de alimentos y consumo masivo en Ecuador. Trabajas para "Titán, tu Socio Mayorista".
 
-Aplica EXACTAMENTE esta metodología de "Puntaje de Potencial Mayorista" (Modelado Lookalike / Datos Firmográficos, sin datos de comportamiento digital):
+Tienes acceso a búsqueda web. ÚSALA para investigar contexto real antes de calificar — no improvises ni copies una tabla mecánica de memoria. Busca, por ejemplo: si el negocio o la cadena mencionada tiene presencia pública verificable (número de sucursales, reputación, tamaño real); los topes de facturación vigentes del SRI para cada régimen tributario en Ecuador; y las características comerciales reales del sector/ciudad mencionado (densidad de negocios institucionales, nivel socioeconómico, perfil turístico o logístico).
 
-FÓRMULA (peso de cada variable):
-- Tipo de Negocio: 50% — predictor más fuerte del patrón de recompra recurrente.
-- Régimen Tributario: 35% — proxy oficial de tamaño económico (RIMPE Popular: tope ~$20,000/año; RIMPE Emprendedor: tope ~$300,000/año; Régimen General: sin tope).
-- Ubicación: 15% — señal más débil, indica densidad comercial y costo logístico, no garantiza volumen.
+MARCO DE REFERENCIA (guía de tu juicio, NO una tabla de copiar mecánicamente):
+- Tipo de Negocio — peso 50% del puntaje final. Evalúa el patrón de recompra recurrente típico de este tipo de negocio, informado por lo que encuentres en tu investigación sobre el caso específico (cadena vs. independiente, tamaño real si es identificable).
+- Régimen Tributario — peso 35%. Es un proxy de tamaño económico; investiga los topes de facturación reales vigentes por régimen y sitúa a este negocio dentro de ese contexto con criterio, no automáticamente.
+- Ubicación — peso 15%. Investiga las características comerciales reales del sector/ciudad — no asumas por el nombre del barrio sin evidencia.
 
-TABLA DE PUNTOS (escala 0-10 por variable):
-Tipo de Negocio: Hotel=10, Restaurante=9, Minimarket=8, Panadería=8, Cafetería=7, Tienda=6, Particular=0. Si el tipo no está en esta lista, asigna el puntaje más parecido según su patrón de consumo institucional.
-Régimen Tributario: Régimen General=10, RIMPE Emprendedor=6, RIMPE Popular=3. Si no se especifica, usa 5 (neutral) y acláralo en la justificación.
-Ubicación: clasifica la ciudad/sector en Comercial-Consolidado=10, Residencial-Mixto=6, o Rural-Periférico=3, usando tu conocimiento general de la geografía comercial ecuatoriana (ej. Urdesa, Kennedy, Ceibos, La Carolina, González Suárez = comercial consolidado).
+REGLAS DE RIGOR ANALÍTICO (esto es lo más importante — léelo con cuidado):
+- NUNCA asignes 10/10 automáticamente solo porque el negocio "encaja" con la categoría más favorable de tu marco de referencia. Un 10/10 debe reservarse SOLO para casos con evidencia sólida y excepcional encontrada en tu investigación — son la minoría, no la norma.
+- Distribuye tus puntajes de forma realista y variada: la mayoría de leads reales deberían caer en rangos medios (4 a 7 sobre 10) en al menos una de las tres variables. Si terminas dándole 9 o 10 a las tres variables, revisa tu propio análisis — probablemente estás siendo mecánico en vez de crítico.
+- Cada justificación debe citar un hecho específico de tu investigación (no una generalidad tipo "es un buen sector"). Si no encontraste evidencia sólida para algo, dilo explícitamente y baja el puntaje en consecuencia — la falta de evidencia verificable es en sí misma una señal de menor certeza, no de neutralidad.
+- Sé un analista escéptico, no un vendedor optimista. Tu credibilidad depende de que un ejecutivo pueda confiar en que este puntaje refleja evidencia real, no una calificación automática.
 
 FÓRMULA FINAL: score = (PtsNegocio/10 × 50) + (PtsRégimen/10 × 35) + (PtsUbicación/10 × 15)
-
 CLÚSTERES: Oro (75-100, alta prioridad), Plata (40-74, maduración), Bronce (0-39, descartado/bajo esfuerzo).
 
-Responde ÚNICAMENTE con un JSON válido (sin texto adicional, sin markdown) con esta forma EXACTA:
+Al terminar tu investigación, responde ÚNICAMENTE con un JSON válido (sin texto adicional, sin markdown) con esta forma EXACTA:
 {
   "businessTypePoints": <0-10>,
-  "businessTypeJustification": "<1 frase>",
+  "businessTypeJustification": "<1-2 frases citando evidencia específica que encontraste>",
   "regimePoints": <0-10>,
-  "regimeJustification": "<1 frase>",
+  "regimeJustification": "<1-2 frases citando evidencia específica que encontraste>",
   "locationPoints": <0-10>,
   "locationClassification": "<Comercial-Consolidado|Residencial-Mixto|Rural-Periférico>",
-  "locationJustification": "<1 frase>",
+  "locationJustification": "<1-2 frases citando evidencia específica que encontraste>",
   "score": <0-100, resultado exacto de la fórmula>,
   "cluster": "<Oro|Plata|Bronce>",
-  "reasoning": "<2-3 frases resumen ejecutivo, para mostrar en la lista de prospectos>"
+  "reasoning": "<2-3 frases resumen ejecutivo, para mostrar en la lista de prospectos>",
+  "sources": [{"title": "<título real de la fuente consultada>", "url": "<url real>"}]
 }`;
 
     const userPrompt = `Lead a calificar:
@@ -88,9 +118,11 @@ Responde ÚNICAMENTE con un JSON válido (sin texto adicional, sin markdown) con
 - Régimen Tributario: ${regimenTributario || 'No especificado'}
 - Ciudad / Ubicación: ${city || 'N/D'}
 - Observaciones adicionales: ${observations || 'Ninguna'}
-- Historial de seguimiento: ${history?.length ? history.map(h => h.details).join('; ') : 'Sin historial previo'}`;
+- Historial de seguimiento: ${history?.length ? history.map(h => h.details).join('; ') : 'Sin historial previo'}
 
-    const result = await callClaude(systemPrompt, userPrompt);
+Investiga lo que necesites antes de responder, y luego entrega el JSON final.`;
+
+    const result = await callClaude(systemPrompt, userPrompt, { maxTokens: 2500, enableSearch: true });
 
     // Verificamos que la fórmula cuadre (por si el modelo se desvía); si no, la recalculamos nosotros mismos.
     const expectedScore = Math.round(
@@ -115,6 +147,7 @@ Responde ÚNICAMENTE con un JSON válido (sin texto adicional, sin markdown) con
         locationClassification: result.locationClassification,
         locationJustification: result.locationJustification,
         formula: `(${result.businessTypePoints}/10 × 50) + (${result.regimePoints}/10 × 35) + (${result.locationPoints}/10 × 15) = ${score}/100`,
+        sources: Array.isArray(result.sources) ? result.sources.slice(0, 6) : [],
       },
     });
   } catch (err) {
