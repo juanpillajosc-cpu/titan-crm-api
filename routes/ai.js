@@ -20,7 +20,9 @@ async function callClaude(systemPrompt, userPrompt, { maxTokens = 1200, enableSe
     messages: [{ role: 'user', content: userPrompt }],
   };
   if (enableSearch) {
-    body.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }];
+    // 3 búsquedas alcanza para investigar las 3 variables del modelo (negocio, régimen, ubicación)
+    // con evidencia real, sin dejar que el costo se dispare por consultas exploratorias de más.
+    body.tools = [{ type: 'web_search_20250305', name: 'web_search', max_uses: 3 }];
   }
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -120,7 +122,7 @@ Al terminar tu investigación, responde ÚNICAMENTE con un JSON válido (sin tex
 - Observaciones adicionales: ${observations || 'Ninguna'}
 - Historial de seguimiento: ${history?.length ? history.map(h => h.details).join('; ') : 'Sin historial previo'}
 
-Investiga lo que necesites antes de responder, y luego entrega el JSON final.`;
+Tienes hasta 3 búsquedas disponibles — úsalas con criterio: idealmente una para investigar el negocio/cadena específico, una para el contexto del régimen tributario, y una para el sector/ubicación. Prioriza la que más incertidumbre resuelva para este caso particular. Luego entrega el JSON final.`;
 
     const result = await callClaude(systemPrompt, userPrompt, { maxTokens: 2500, enableSearch: true });
 
