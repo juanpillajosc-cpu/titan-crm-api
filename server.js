@@ -23,7 +23,7 @@ app.use('/api/prospects', createCrudRouter({
 
 app.use('/api/clients', createCrudRouter({
   table: 'clients', idPrefix: 'C', idStart: 100, idPadding: 0, hasUpdatedAt: true,
-  jsonbSnakeFields: ['documents', 'collections_history', 'activities'],
+  jsonbSnakeFields: ['documents', 'collections_history', 'activities', 'approval_history'],
 }));
 
 app.use('/api/products', createCrudRouter({
