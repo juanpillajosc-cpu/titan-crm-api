@@ -6,7 +6,7 @@ const AI_MODEL = process.env.AI_MODEL || 'claude-sonnet-5';
 
 // Llama a la API de Anthropic con la key protegida en el servidor (nunca en el navegador),
 // pidiendo una respuesta en JSON puro para poder parsearla de forma confiable.
-async function callClaude(systemPrompt, userPrompt) {
+async function callClaude(systemPrompt, userPrompt, maxTokens = 1200) {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error('Falta configurar ANTHROPIC_API_KEY en las variables de entorno del backend.');
   }
@@ -19,7 +19,7 @@ async function callClaude(systemPrompt, userPrompt) {
     },
     body: JSON.stringify({
       model: AI_MODEL,
-      max_tokens: 500,
+      max_tokens: maxTokens,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     }),
@@ -35,7 +35,12 @@ async function callClaude(systemPrompt, userPrompt) {
   if (!textBlock) throw new Error('La API de IA no devolvió una respuesta de texto.');
 
   const cleaned = textBlock.text.replace(/```json|```/g, '').trim();
-  return JSON.parse(cleaned);
+  try {
+    return JSON.parse(cleaned);
+  } catch (parseErr) {
+    console.error('No se pudo parsear la respuesta de la IA como JSON. Texto crudo:', cleaned);
+    throw new Error(`La IA devolvió una respuesta incompleta o mal formada (posible corte por límite de tokens). ${parseErr.message}`);
+  }
 }
 
 // ---------- Lead Scoring de prospectos: "Puntaje de Potencial Mayorista" ----------
